@@ -9,8 +9,6 @@ import org.apache.kafka.connect.data.Date;
 import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.storage.Converter;
 import us.bpsm.edn.Keyword;
-import us.bpsm.edn.Named;
-import us.bpsm.edn.Symbol;
 import us.bpsm.edn.parser.Parseable;
 import us.bpsm.edn.parser.Parser;
 import us.bpsm.edn.parser.Parsers;
@@ -87,23 +85,10 @@ public class EdnConverter implements Converter {
         TO_CONNECT_CONVERTERS.put(Schema.Type.STRING, new EdnToConnectTypeConverter() {
             @Override
             public Object convert(EdnConverterConfig config, Schema schema, Object value) {
-                Keyword kw;
-                Symbol sym;
-                String delim = "-";
-                String rawKeystr;
                 if (value instanceof UUID)
                     return ((UUID)value).toString();
-                else if (value instanceof Named) {
-                    kw = (Keyword)value;
-                    if (kw.getPrefix() != null && !kw.getPrefix().equals("")) {
-                        if (config.internalKeyFormat().equals(CaseFormat.LOWER_UNDERSCORE))
-                            delim = "_";
-                        else if (config.internalKeyFormat().equals(CaseFormat.UPPER_CAMEL))
-                            delim = "";
-                        rawKeystr = kw.getPrefix() + delim + kw.getName();
-                    } else
-                        rawKeystr = kw.getName();
-                    return config.internalKeyFormat().to(config.externalKeyFormat(), rawKeystr);
+                else if (value instanceof Keyword) {
+                    return keywordToString(config, (Keyword)value);
                 } else
                     return (String)value;
             }
@@ -287,20 +272,7 @@ public class EdnConverter implements Converter {
                     Map<Keyword, Object> convertedStruct = new HashMap<Keyword, Object>();
                     for (Field field : schema.fields()) {
                         Object newValue = convertToEdn(config, schema, struct.get(field));
-                        CaseFormat externalFormat = config.externalKeyFormat();
-                        CaseFormat internalFormat = config.internalKeyFormat();
-                        String[] nameParts = field.name().split("/");
-                        String convertedKeyNamespace, convertedKeyName;
-                        Keyword newKey;
-                        if (nameParts.length > 1) {
-                            convertedKeyNamespace = externalFormat.to(internalFormat, nameParts[0]);
-                            convertedKeyName = externalFormat.to(internalFormat, nameParts[1]);
-                            newKey = Keyword.newKeyword(convertedKeyNamespace, convertedKeyName);
-                        } else {
-                            convertedKeyName = externalFormat.to(internalFormat, field.name());
-                            newKey = Keyword.newKeyword(convertedKeyName);
-                        }
-                        convertedStruct.put(newKey, newValue);
+                        convertedStruct.put(stringToKeyword(config, field.name()), newValue);
                     }
                     return convertedStruct;
                 }
@@ -393,6 +365,9 @@ public class EdnConverter implements Converter {
                 break;
             case FLOAT64:
                 ednSchema = EdnSchema.FLOAT64_SCHEMA.asMap();
+                break;
+            case BYTES:
+                ednSchema = EdnSchema.BYTES_SCHEMA.asMap();
                 break;
             case STRING:
                 ednSchema = EdnSchema.STRING_SCHEMA.asMap();
