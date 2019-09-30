@@ -4,7 +4,7 @@
   <groupId>com.rentpath</groupId>
   <artifactId>kafka-connect-converters</artifactId>
   <name>Kafka Connect Converters</name>
-  <version>0.1.1-SNAPSHOT</version>
+  <version>0.1.0-SNAPSHOT</version>
   <url>https://github.com/rentpath/kafka-connect-converters</url>
   <developers>
     <developer>
