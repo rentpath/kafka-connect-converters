@@ -1,4 +1,4 @@
-package com.rentpath.kafka.connect.converters;
+package com.rentpath.kafka.connect.converters.edn;
 
 import com.google.common.base.CaseFormat;
 import org.apache.kafka.common.config.ConfigDef;
