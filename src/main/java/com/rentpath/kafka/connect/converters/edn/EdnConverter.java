@@ -43,18 +43,24 @@ public class EdnConverter implements Converter {
         TO_CONNECT_CONVERTERS.put(Schema.Type.INT8, new EdnToConnectTypeConverter() {
             @Override
             public Object convert(EdnConverterConfig config, Schema schema, Object value) {
+                if (value instanceof Long)
+                    return ((Long)value).byteValue();
                 return (byte)value;
             }
         });
         TO_CONNECT_CONVERTERS.put(Schema.Type.INT16, new EdnToConnectTypeConverter() {
             @Override
             public Object convert(EdnConverterConfig config, Schema schema, Object value) {
+                if (value instanceof Long)
+                    return ((Long)value).shortValue();
                 return (short)value;
             }
         });
         TO_CONNECT_CONVERTERS.put(Schema.Type.INT32, new EdnToConnectTypeConverter() {
             @Override
             public Object convert(EdnConverterConfig config, Schema schema, Object value) {
+                if (value instanceof Long)
+                    return ((Long)value).intValue();
                 return (int)value;
             }
         });
@@ -62,9 +68,9 @@ public class EdnConverter implements Converter {
             @Override
             public Object convert(EdnConverterConfig config, Schema schema, Object value) {
                 if (value instanceof java.util.Date)
-                    return ((java.util.Date)value).getTime();
+                    return (java.util.Date)value;
                 if (value instanceof GregorianCalendar)
-                    return ((GregorianCalendar)value).getTimeInMillis();
+                    return new java.util.Date(((GregorianCalendar)value).getTimeInMillis());
                 else
                     return (long)value;
 
@@ -73,6 +79,8 @@ public class EdnConverter implements Converter {
         TO_CONNECT_CONVERTERS.put(Schema.Type.FLOAT32, new EdnToConnectTypeConverter() {
             @Override
             public Object convert(EdnConverterConfig config, Schema schema, Object value) {
+                if (value instanceof Double)
+                    return ((Double)value).floatValue();
                 return (float)value;
             }
         });
@@ -196,7 +204,7 @@ public class EdnConverter implements Converter {
 
     private Map<Keyword, Object> convertToEdnWithEnvelope(EdnConverterConfig config, Schema schema, Object value) {
         Map<Keyword, Object> map = new HashMap<>();
-        map.put(EdnSchema.SCHEMA_FIELD, asEdnSchema(schema));
+        map.put(EdnSchema.SCHEMA_FIELD, asEdnSchema(schema, true));
         map.put(EdnSchema.PAYLOAD_FIELD, convertToEdn(config, schema, value));
         return map;
     }
@@ -227,6 +235,8 @@ public class EdnConverter implements Converter {
                 case INT32:
                     return (int)value;
                 case INT64:
+                    if (value instanceof java.util.Date)
+                        return ((java.util.Date)value);
                     return (long)value;
                 case FLOAT32:
                     return (float)value;
@@ -241,6 +251,8 @@ public class EdnConverter implements Converter {
                         return (byte[]) value;
                     else if (value instanceof ByteBuffer)
                         return ((ByteBuffer) value).array();
+                    else if (value instanceof BigDecimal)
+                        return (BigDecimal)value;
                     else
                         throw new DataException("Invalid type for bytes type: " + value.getClass());
                 case ARRAY: {
@@ -266,19 +278,17 @@ public class EdnConverter implements Converter {
                     return convertedMap;
                 }
                 case STRUCT: {
-                    Struct struct = (Struct) value;
+                    Struct struct = (Struct)value;
                     if (!struct.schema().equals(schema))
                         throw new DataException("Mismatching schema.");
                     Map<Keyword, Object> convertedStruct = new HashMap<Keyword, Object>();
                     for (Field field : schema.fields()) {
-                        Object newValue = convertToEdn(config, schema, struct.get(field));
+                        Object newValue = convertToEdn(config, field.schema(), struct.get(field));
                         convertedStruct.put(stringToKeyword(config, field.name()), newValue);
                     }
                     return convertedStruct;
                 }
             }
-            if (value instanceof BigDecimal)
-                return (BigDecimal)value;
             if (value instanceof java.util.Date)
                 return ((java.util.Date)value);
 
@@ -297,7 +307,7 @@ public class EdnConverter implements Converter {
                 return schema.defaultValue(); // any logical type conversions should already have been applied
             if (schema.isOptional())
                 return null;
-            throw new DataException("Invalid null value for required " + schemaType +  " field");
+            throw new DataException("Invalid null value for required " + schemaType +  " field ");
         }
 
         final EdnToConnectTypeConverter typeConverter = TO_CONNECT_CONVERTERS.get(schemaType);
@@ -334,15 +344,21 @@ public class EdnConverter implements Converter {
         if (!rootMap.containsKey(EdnSchema.PAYLOAD_FIELD))
             throw new DataException("Root message EDN node has no payload field. Payload required for sinking.");
         Schema schema = asConnectSchema((Map<Keyword, Object>)rootMap.get(EdnSchema.SCHEMA_FIELD));
-        return new SchemaAndValue(schema, convertToConnect(config, schema, parsed));
+        return new SchemaAndValue(schema, convertToConnect(config, schema, rootMap.get(EdnSchema.PAYLOAD_FIELD)));
     }
 
     private Map<Keyword, Object> asEdnSchema(Schema schema) {
+        return asEdnSchema(schema, false);
+    }
+
+    private Map<Keyword, Object> asEdnSchema(Schema schema, boolean cache) {
         if (schema == null)
             return null;
-        Map<Keyword, Object> cached = fromConnectSchemaCache.get(schema);
-        if (cached != null)
-            return cached;
+        if (cache) {
+            Map<Keyword, Object> cached = fromConnectSchemaCache.get(schema);
+            if (cached != null)
+                return cached;
+        }
         final Map<Keyword, Object> ednSchema;
         switch (schema.type()) {
             case BOOLEAN:
@@ -413,16 +429,23 @@ public class EdnConverter implements Converter {
         }
         if (schema.defaultValue() != null)
             ednSchema.put(EdnSchema.SCHEMA_DEFAULT_FIELD, convertToEdn(config, schema, schema.defaultValue()));
-        fromConnectSchemaCache.put(schema, ednSchema);
+        if (cache)
+            fromConnectSchemaCache.put(schema, ednSchema);
         return ednSchema;
     }
 
     private Schema asConnectSchema(Map<Keyword, Object> ednSchema) {
+        return asConnectSchema(ednSchema, false);
+    }
+
+    private Schema asConnectSchema(Map<Keyword, Object> ednSchema, boolean cache) {
         if (ednSchema == null)
             return null;
-        Schema cached = toConnectSchemaCache.get(ednSchema);
-        if (cached != null)
-            return cached;
+        if (cache) {
+            Schema cached = toConnectSchemaCache.get(ednSchema);
+            if (cached != null)
+                return cached;
+        }
         String type = (String)ednSchema.get(EdnSchema.SCHEMA_TYPE_FIELD);
         if (type == null)
             throw new DataException("Schema must contain :type field.");
@@ -504,9 +527,9 @@ public class EdnConverter implements Converter {
         }
 
         if (ednSchema.containsKey(EdnSchema.SCHEMA_VERSION_FIELD)) {
-            Integer schemaVersion = (Integer) ednSchema.get(EdnSchema.SCHEMA_VERSION_FIELD);
+            Long schemaVersion = (Long)ednSchema.get(EdnSchema.SCHEMA_VERSION_FIELD);
             if (schemaVersion != null)
-                builder.version(schemaVersion);
+                builder.version(schemaVersion.intValue());
         }
 
         if (ednSchema.containsKey(EdnSchema.SCHEMA_DOC_FIELD)) {
@@ -529,7 +552,8 @@ public class EdnConverter implements Converter {
         }
 
         Schema result = builder.build();
-        toConnectSchemaCache.put(ednSchema, result);
+        if (cache)
+            toConnectSchemaCache.put(ednSchema, result);
         return result;
     }
 
