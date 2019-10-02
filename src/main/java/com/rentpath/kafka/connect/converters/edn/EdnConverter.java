@@ -9,6 +9,7 @@ import org.apache.kafka.connect.data.Date;
 import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.storage.Converter;
 import us.bpsm.edn.Keyword;
+import us.bpsm.edn.Named;
 import us.bpsm.edn.parser.Parseable;
 import us.bpsm.edn.parser.Parser;
 import us.bpsm.edn.parser.Parsers;
@@ -105,7 +106,7 @@ public class EdnConverter implements Converter {
             @Override
             public Object convert(EdnConverterConfig config, Schema schema, Object value) {
                 if (value instanceof BigInteger)
-                    return ((BigInteger)value);
+                    return new BigDecimal((BigInteger)value);
                 if (value instanceof BigDecimal)
                     return ((BigDecimal)value);
                 else
@@ -163,8 +164,6 @@ public class EdnConverter implements Converter {
             public Object convert(Schema schema, Object value) {
                 if (value instanceof BigDecimal)
                     return (BigDecimal)value;
-                if (value instanceof BigInteger)
-                    return new BigDecimal((BigInteger)value, 0);
                 else
                     throw new DataException("Invalid type for Decimal, underlying representation should be BigDecimal but was " + value.getClass());
             }
@@ -253,6 +252,8 @@ public class EdnConverter implements Converter {
                         return ((ByteBuffer) value).array();
                     else if (value instanceof BigDecimal)
                         return (BigDecimal)value;
+                    else if (value instanceof BigInteger)
+                        return new BigDecimal((BigInteger)value);
                     else
                         throw new DataException("Invalid type for bytes type: " + value.getClass());
                 case ARRAY: {
@@ -325,7 +326,13 @@ public class EdnConverter implements Converter {
 
     @Override
     public byte[] fromConnectData(String s, Schema schema, Object o) {
-        return Printers.printString(Printers.defaultPrinterProtocol(), convertToEdnWithEnvelope(config, schema, o)).getBytes();
+        Object ednData;
+        if (config.autoderiveSchemas()) {
+            ednData = convertToEdn(config, schema, o);
+        } else {
+            ednData = convertToEdnWithEnvelope(config, schema, o);
+        }
+        return Printers.printString(Printers.defaultPrinterProtocol(), ednData).getBytes();
     }
 
     @Override
@@ -334,17 +341,25 @@ public class EdnConverter implements Converter {
             return SchemaAndValue.NULL;
         Parseable p = Parsers.newParseable(new String(bytes));
         Object parsed = parser.nextValue(p);
-        if (!(parsed instanceof Map))
-            throw new DataException("Root message EDN node not a map. Message invalid for sinking.");
-        Map<Keyword, ?> rootMap = (Map<Keyword, ?>)parsed;
-        if (!rootMap.containsKey(EdnSchema.SCHEMA_FIELD))
-            throw new DataException("Root message EDN node has no schema field. Schema required for sinking.");
-        if (!(rootMap.get(EdnSchema.PAYLOAD_FIELD) instanceof Map))
-            throw new DataException("Root message EDN node schema field malformed. Valid schema required for sinking.");
-        if (!rootMap.containsKey(EdnSchema.PAYLOAD_FIELD))
-            throw new DataException("Root message EDN node has no payload field. Payload required for sinking.");
-        Schema schema = asConnectSchema((Map<Keyword, Object>)rootMap.get(EdnSchema.SCHEMA_FIELD));
-        return new SchemaAndValue(schema, convertToConnect(config, schema, rootMap.get(EdnSchema.PAYLOAD_FIELD)));
+        Schema schema;
+        Object ednData;
+        if (config.autoderiveSchemas()) {
+            if (!(parsed instanceof Map))
+                throw new DataException("Root message EDN node not a map. Message invalid for sinking.");
+            Map<Keyword, ?> rootMap = (Map<Keyword, ?>)parsed;
+            if (!rootMap.containsKey(EdnSchema.SCHEMA_FIELD))
+                throw new DataException("Root message EDN node has no schema field. Schema required for sinking.");
+            if (!(rootMap.get(EdnSchema.PAYLOAD_FIELD) instanceof Map))
+                throw new DataException("Root message EDN node schema field malformed. Valid schema required for sinking.");
+            if (!rootMap.containsKey(EdnSchema.PAYLOAD_FIELD))
+                throw new DataException("Root message EDN node has no payload field. Payload required for sinking.");
+            schema = asConnectSchema((Map<Keyword, Object>)rootMap.get(EdnSchema.SCHEMA_FIELD));
+            ednData = rootMap.get(EdnSchema.PAYLOAD_FIELD);
+        } else {
+            schema = deriveConnectSchema(parsed);
+            ednData = parsed;
+        }
+        return new SchemaAndValue(schema, convertToConnect(config, schema, ednData));
     }
 
     private Map<Keyword, Object> asEdnSchema(Schema schema) {
@@ -436,6 +451,76 @@ public class EdnConverter implements Converter {
 
     private Schema asConnectSchema(Map<Keyword, Object> ednSchema) {
         return asConnectSchema(ednSchema, false);
+    }
+
+    private Schema deriveConnectSchema(Object o) {
+        SchemaBuilder builder;
+        if (o == null) {
+            builder = SchemaBuilder.struct();
+            builder.optional();
+            return builder.build();
+        } else if (o instanceof Named || o instanceof UUID || o instanceof CharSequence)
+            builder = SchemaBuilder.string();
+        else if (o instanceof Boolean)
+            builder = SchemaBuilder.bool();
+        else if (o instanceof byte[])
+            builder = SchemaBuilder.bytes();
+        else if (o instanceof BigInteger || o instanceof BigDecimal) {
+            builder = SchemaBuilder.bytes();
+            builder.name(Decimal.LOGICAL_NAME);
+        } else if (o instanceof Long)
+            builder = SchemaBuilder.int64();
+        else if (o instanceof java.util.Date || o instanceof GregorianCalendar) {
+            builder = SchemaBuilder.int64();
+            builder.name(Date.LOGICAL_NAME);
+        } else if (o instanceof Integer)
+            builder = SchemaBuilder.int32();
+        else if (o instanceof Short)
+            builder = SchemaBuilder.int16();
+        else if (o instanceof Byte || o instanceof Character)
+            builder = SchemaBuilder.int8();
+        else if (o instanceof Double)
+            builder = SchemaBuilder.float64();
+        else if (o instanceof Float)
+            builder = SchemaBuilder.float32();
+        else if (o instanceof List || o instanceof Set) {
+            Object firstElement = null;
+            for (Object element : (Collection) o) {
+                if (firstElement == null) {
+                    firstElement = element;
+                    continue;
+                }
+                if (!element.getClass().equals(firstElement.getClass()))
+                    throw new DataException("Non-homogeneous collection received! Cannot derive schema!");
+            }
+            builder = SchemaBuilder.array(deriveConnectSchema(firstElement));
+        } else if (o instanceof Map) {
+            Object firstKey = null;
+            Object firstValue = null;
+            for (Map.Entry<Object, Object> entry: ((Map<Object, Object>)o).entrySet()) {
+                if (firstKey == null) {
+                    firstKey = entry.getKey();
+                    firstValue = entry.getValue();
+                    continue;
+                }
+                if (!entry.getKey().getClass().equals(firstKey.getClass()))
+                    throw new DataException("Non-homogeneously-keyed map received! Cannot derive schema!");
+                if (!firstKey.getClass().equals(Keyword.class) && !entry.getValue().getClass().equals(firstValue.getClass()))
+                    throw new DataException("Non-homogeneously-valued map received! Cannot derive schema!");
+            }
+            if (firstKey == null || !firstKey.getClass().equals(Keyword.class)) {
+                builder = SchemaBuilder.map(deriveConnectSchema(firstKey), deriveConnectSchema(firstValue));
+            } else {
+                builder = KeywordFieldSchemaBuilder.struct();
+                for (Map.Entry<Keyword, Object> entry: ((Map<Keyword, Object>)o).entrySet()) {
+                    ((KeywordFieldSchemaBuilder)builder).keywordField(entry.getKey(),keywordToString(config, entry.getKey()), deriveConnectSchema(entry.getValue()));
+                }
+            }
+        } else {
+            throw new DataException("Unrecognized object. Cannot derive schema");
+        }
+        builder.optional();
+        return builder.build();
     }
 
     private Schema asConnectSchema(Map<Keyword, Object> ednSchema, boolean cache) {
