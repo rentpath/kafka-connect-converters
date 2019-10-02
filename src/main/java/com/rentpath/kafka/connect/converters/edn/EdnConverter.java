@@ -172,6 +172,8 @@ public class EdnConverter implements Converter {
         TO_CONNECT_LOGICAL_CONVERTERS.put(Date.LOGICAL_NAME, new LogicalTypeConverter() {
             @Override
             public Object convert(Schema schema, Object value) {
+                if (value instanceof java.util.Date)
+                    return (java.util.Date)value;
                 if (!(value instanceof Integer))
                     throw new DataException("Invalid type for Date, underlying representation should be int32 but was " + value.getClass());
                 return Date.toLogical(schema, (int) value);
@@ -344,20 +346,22 @@ public class EdnConverter implements Converter {
         Schema schema;
         Object ednData;
         if (config.autoderiveSchemas()) {
+            schema = deriveConnectSchema(parsed);
+            ednData = parsed;
+        } else {
             if (!(parsed instanceof Map))
                 throw new DataException("Root message EDN node not a map. Message invalid for sinking.");
             Map<Keyword, ?> rootMap = (Map<Keyword, ?>)parsed;
             if (!rootMap.containsKey(EdnSchema.SCHEMA_FIELD))
                 throw new DataException("Root message EDN node has no schema field. Schema required for sinking.");
-            if (!(rootMap.get(EdnSchema.PAYLOAD_FIELD) instanceof Map))
+            if (!(rootMap.get(EdnSchema.SCHEMA_FIELD) instanceof Map))
                 throw new DataException("Root message EDN node schema field malformed. Valid schema required for sinking.");
             if (!rootMap.containsKey(EdnSchema.PAYLOAD_FIELD))
                 throw new DataException("Root message EDN node has no payload field. Payload required for sinking.");
+            if (!(rootMap.get(EdnSchema.PAYLOAD_FIELD) instanceof Map))
+                throw new DataException("Root message EDN node payload field malformed. Valid schema required for sinking.");
             schema = asConnectSchema((Map<Keyword, Object>)rootMap.get(EdnSchema.SCHEMA_FIELD));
             ednData = rootMap.get(EdnSchema.PAYLOAD_FIELD);
-        } else {
-            schema = deriveConnectSchema(parsed);
-            ednData = parsed;
         }
         return new SchemaAndValue(schema, convertToConnect(config, schema, ednData));
     }
