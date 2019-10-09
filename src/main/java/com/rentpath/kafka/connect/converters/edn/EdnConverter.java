@@ -278,6 +278,13 @@ public class EdnConverter implements Converter {
                         Object newValue = convertToEdn(config, valueSchema, entry.getValue());
                         convertedMap.put(newKey, newValue);
                     }
+                    if (config.canonicalizeMapKeys()) {
+                        try {
+                            return new TreeMap<Object, Object>(convertedMap);
+                        } catch (ClassCastException e) {
+                            return convertedMap;
+                        }
+                    }
                     return convertedMap;
                 }
                 case STRUCT: {
@@ -288,6 +295,13 @@ public class EdnConverter implements Converter {
                     for (Field field : schema.fields()) {
                         Object newValue = convertToEdn(config, field.schema(), struct.get(field));
                         convertedStruct.put(stringToKeyword(config, field.name()), newValue);
+                    }
+                    if (config.canonicalizeMapKeys()) {
+                        try {
+                            return new TreeMap<Object, Object>(convertedStruct);
+                        } catch (ClassCastException e) {
+                            return convertedStruct;
+                        }
                     }
                     return convertedStruct;
                 }

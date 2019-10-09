@@ -32,6 +32,11 @@ public class EdnConverterConfig extends ConverterConfig {
     private static final String SCHEMAS_AUTODERIVE_DOC = "Whether to attempt autoderivation of schema from the structure of the message. Subject to homogeneity conditions.";
     private static final String SCHEMAS_AUTODERIVE_DISPLAY = "Autoderive Schema";
 
+    public static final String MAP_KEYS_CANONICALIZATION_CONFIG = "map.keys.canonicalization";
+    public static final boolean MAP_KEYS_CANONICALIZATION_DEFAULT = false;
+    private static final String MAP_KEYS_CANONICALIZATION_DOC = "Whether to attempt canonicalization (auto-ordering) of map keys while serializing";
+    private static final String MAP_KEYS_CANONICALIZATION_DISPLAY = "Canonicalize map keys";
+
     static {
         CONFIG = ConverterConfig.newConfigDef();
         int orderInGroup = 0;
@@ -79,6 +84,17 @@ public class EdnConverterConfig extends ConverterConfig {
                 Width.MEDIUM,
                 MAP_KEYS_INTERNAL_FORMAT_DISPLAY
         );
+        CONFIG.define(
+                MAP_KEYS_CANONICALIZATION_CONFIG,
+                Type.STRING,
+                MAP_KEYS_CANONICALIZATION_DEFAULT,
+                Importance.HIGH,
+                MAP_KEYS_CANONICALIZATION_DOC,
+                "Map Key Interpretation",
+                orderInGroup++,
+                Width.MEDIUM,
+                MAP_KEYS_CANONICALIZATION_DISPLAY
+        );
     }
 
     public static ConfigDef configDef() {
@@ -113,5 +129,9 @@ public class EdnConverterConfig extends ConverterConfig {
 
     public boolean autoderiveSchemas() {
         return getBoolean(SCHEMAS_AUTODERIVE_CONFIG);
+    }
+
+    public boolean canonicalizeMapKeys() {
+        return getBoolean(MAP_KEYS_CANONICALIZATION_CONFIG);
     }
 }
