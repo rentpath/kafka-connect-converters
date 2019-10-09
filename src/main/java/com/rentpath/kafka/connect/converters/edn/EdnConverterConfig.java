@@ -86,7 +86,7 @@ public class EdnConverterConfig extends ConverterConfig {
         );
         CONFIG.define(
                 MAP_KEYS_CANONICALIZATION_CONFIG,
-                Type.STRING,
+                Type.BOOLEAN,
                 MAP_KEYS_CANONICALIZATION_DEFAULT,
                 Importance.HIGH,
                 MAP_KEYS_CANONICALIZATION_DOC,
